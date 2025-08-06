@@ -1,7 +1,8 @@
 #include "mbed.h"
 
-BufferedSerial uart0(P1_7, P1_6,115200);  //TX, RX
+BufferedSerial uart0(P1_7, P1_6,9600);
 SPI spi(P0_9, P0_8, P0_6);    //mosi, miso, sclk
+I2C i2c(P0_5,P0_4); //SDA,SCL P0_5,P0_4
 DigitalOut LE1(P1_4);   //dds1
 DigitalOut LE2(P1_1);
 DigitalOut LE3(P0_2);
@@ -10,92 +11,85 @@ DigitalOut CS1(P1_5);   //dac1
 DigitalOut CS2(P1_2);
 DigitalOut CS3(P1_9);
 DigitalOut CS4(P0_3);
-DigitalOut SYNC1(P0_4);
-DigitalOut SYNC2(P0_5);
+AnalogIn ain0(P0_11);
+AnalogIn ain1(P1_0);
 
 //cs control func.
 void cs_hi(uint8_t num);    //dac
 void cs_lo(uint8_t num);
 void le_hi(uint8_t num);    //dds
 void le_lo(uint8_t num);
-
-//uart read buf
-const uint8_t buf_size=15;
-void buf_read(uint8_t num); //uart read func.
-char read_buf[buf_size];    //uart read buf
-void buf2val();             //buf to vals change func. return to 'freq' and 'pha' global var 
-uint32_t freq;              //Hz
-uint16_t pha,ampl;          //deg. loaded mV
+uint8_t buf;
 
 //DDS control
 #define res_inv 4           //res=67108864/2^28
 uint8_t i;
 void waveset(uint8_t ch, uint32_t freq, uint16_t pha, uint16_t ampl);    //waveset func.
+uint32_t freq1,freq2,freq3,freq4;              //Hz
+uint16_t pha1,pha2,pha3,pha4,ampl1,ampl2,ampl3,ampl4;          //deg. loaded mV
 
 //DAC control
 #define dac_fs 2500     //DAC full scale Vout
 #define dac_res 4096    //dac resolution 2^12
 #define g 7             //driver amp gain
+#define dac_fs2 3300     //DAC full scale Vout. i2c
+const uint8_t dac_addr=0xc0;    //i2c dac addr
+
+//analog out
+uint16_t a1,a2;
+
+//parser
+char char_read();
+float char2flac();
+void parser();
+float pars[4];
+uint32_t a,b,c,d;
 
 int main(){
     for(i=1;i<=4;++i) cs_hi(i); //CS init
     for(i=1;i<=4;++i) le_hi(i); //LE init
     spi.format(16,2);   //spi mode setting. 2byte transfer, mode 2
-    SYNC1=0;
-    SYNC2=0;
-    while(true) {
-        for(i=1;i<=4;++i){
-            buf_read(buf_size);//uart buf read
-            buf2val();
-            waveset(i,freq,pha,ampl);
+    thread_sleep_for(100);
+
+    while (true){
+        buf=char_read();
+        if(buf=='S'){
+            parser();
+        }else if(buf=='?'){
+            a1=ain0.read_u16()*3300/65535;  //mV unit
+            a2=ain1.read_u16()*3300/65535;  //mV unit
+            printf("%d,%d,%04d,%04d\n\r",0,0,a1,a2);
         }
-        
+        a=(uint32_t)pars[0];
+        b=(uint32_t)pars[1];
+        c=(uint32_t)pars[2];
+        d=(uint32_t)pars[3];
+
+        if(a==1){
+            freq1=b;
+            pha1=c;
+            ampl1=d;
+        }else if(a==2){
+            freq2=b;
+            pha2=c;
+            ampl2=d;
+        }else if(a==3){
+            freq3=b;
+            pha3=c;
+            ampl3=d;
+        }else if(a==4){
+            freq4=b;
+            pha4=c;
+            ampl4=d;
+        }
+        waveset(1,freq1,pha1,ampl1);
+        waveset(2,freq2,pha2,ampl2);
+        waveset(3,freq3,pha3,ampl3);
+        waveset(4,freq4,pha4,ampl4);
+        //accum rest
         for(i=1;i<=4;++i) le_lo(i);
         spi.write(0x2000);      //accum. reset
         for(i=1;i<=4;++i) le_hi(i);
-
-        SYNC1=!SYNC1;
-        SYNC2=!SYNC2;
-    }
-}
-
-//uart char number read func.
-void buf_read(uint8_t num){
-    char local_buf[1];
-    uint8_t i;
-    for (i=0;i<num;++i){
-        uart0.read(local_buf,1);
-        read_buf[i]=local_buf[0];
-    }
-}
-
-//buf to val change func.
-void buf2val(){
-    uint8_t i,j;
-    uint32_t pow10;
-    freq=0;
-    pha=0;
-    ampl=0;
-    for(i=0;i<8;++i){
-        pow10=1;
-        for(j=0;j<7-i;++j){
-            pow10=10*pow10;
-        }
-        freq=freq+(read_buf[i]-48)*pow10;
-    }
-    for(i=0;i<3;++i){
-        pow10=1;
-        for(j=0;j<2-i;++j){
-            pow10=10*pow10;
-        }
-        pha=pha+(read_buf[i+8]-48)*pow10;
-    }
-    for(i=0;i<4;++i){
-        pow10=1;
-        for(j=0;j<3-i;++j){
-            pow10=10*pow10;
-        }
-        ampl=ampl+(read_buf[i+11]-48)*pow10;
     }
 }
 
@@ -128,6 +122,7 @@ void le_lo(uint8_t num){
 //wave set func.
 void waveset(uint8_t ch, uint32_t freq, uint16_t pha, uint16_t ampl){
     uint16_t buf;
+    char set[2];
     if(freq>30000000)freq=30000000;
     if(pha>360)pha=360;
     if(ampl>2100)ampl=2100;
@@ -141,9 +136,49 @@ void waveset(uint8_t ch, uint32_t freq, uint16_t pha, uint16_t ampl){
     buf=(4096*pha/360)+0xC000;
     spi.write(buf);
     le_hi(ch);
-
+    
+    //spi dac
     cs_lo(ch);
     buf=((1200-4*ampl/g)*dac_res/dac_fs)<<2;    //(1/res)*(1200/3)*(3-ampl*2/(200*g))
     spi.write(buf);
     cs_hi(ch);
+
+    //i2c dac
+    buf=((1200-4*ampl/g)*dac_res/dac_fs2);    //(1/res)*(1200/3)*(3-ampl*2/(200*g))
+    set[0]=buf>>8;
+    set[1]=buf&0xff;
+    if(ch==1){
+        i2c.write(dac_addr,set,2);  //ch1 dac
+    }else{
+        i2c.write(dac_addr+0x2,set,2);  //ch2 dac
+    }
+}
+
+char char_read(){
+    char local_buf[1];          //local buffer
+    uart0.read(local_buf,1);    //1-char read
+    return local_buf[0];        //return 1-char
+}
+float char2flac(){
+    char temp[1],local_buf[20];          //local buffer
+    uint8_t i;
+    for(i=0;i<sizeof(local_buf);++i) local_buf[i]='\0'; //init local buf
+    i=0;
+    while(true){
+        temp[0]=char_read();
+        if(temp[0]==',') break; //',' is delimiter
+        local_buf[i]=temp[0];
+        ++i;
+    }
+    return atof(local_buf);
+}
+void parser(){
+    uint8_t i=0;
+    pars[i]=char2flac();
+    ++i;
+    pars[i]=char2flac();
+    ++i;
+    pars[i]=char2flac();
+    ++i;
+    pars[i]=char2flac();
 }
