@@ -1,9 +1,27 @@
 import serial
-inst=serial.Serial("COM12",115200)
-Freq=[1000,1000,1000,1000]  ##kHz unit
-Pha=[0,0,0,0]               ##deg. unit
-Ampl=[1000,1000,1000,1000]  ##mV unit. 50ohm loaded.
+import time
+inst=serial.Serial("COM35",9600)
+Freq1=[1000000,1000000,1000,1000]  #Hz unit
+Pha=[0,0,180,270]               ##deg. unit
+Ampl=[2000,2000,2000,2000]  ##mVpp unit. 50ohm loaded.
+Freq2=[1700000,1700000]  #kHz unit
+Att=[0,0]  ##internal att value. PLL output is 4.65dBm
 
-buf=f'{Freq[0]*1000:08}'+f'{Pha[0]:03}'+f'{Ampl[0]:04}'+f'{Freq[1]*1000:08}'+f'{Pha[1]:03}'+f'{Ampl[1]:04}'+f'{Freq[2]*1000:08}'+f'{Pha[2]:03}'+f'{Ampl[2]:04}'+f'{Freq[3]*1000:08}'+f'{Pha[3]:03}'+f'{Ampl[3]:04}'
+buf='S1,'+f'{Freq1[0]}'+','+f'{Pha[0]}'+','+f'{Ampl[0]}'+','
 inst.write(buf.encode())
-print('Ch1 Freq=',Freq[0],'kHz, Pha=',Pha[0],'deg., Ampl=',Ampl[0],'mV\nCh2 Freq=',Freq[1],'kHz, Pha=',Pha[1],'deg., Ampl=',Ampl[1],'mV\nCh3 Freq=',Freq[2],'kHz, Pha=',Pha[2],'deg., Ampl=',Ampl[2],'mV\nCh4 Freq=',Freq[3],'kHz, Pha=',Pha[3],'deg., Ampl=',Ampl[3],'mV\n')
+buf='S2,'+f'{Freq1[1]}'+','+f'{Pha[1]}'+','+f'{Ampl[1]}'+','
+inst.write(buf.encode())
+buf='S3,'+f'{Freq1[2]}'+','+f'{Pha[2]}'+','+f'{Ampl[2]}'+','
+inst.write(buf.encode())
+buf='S4,'+f'{Freq1[3]}'+','+f'{Pha[3]}'+','+f'{Ampl[3]}'+','
+inst.write(buf.encode())
+buf='S5,'+f'{Freq2[0]}'+','+f'{Att[0]}'+',,'
+inst.write(buf.encode())
+buf='S6,'+f'{Freq2[1]}'+','+f'{Att[1]}'+',,'
+inst.write(buf.encode())
+
+time.sleep(0.2)
+buf='?'
+inst.write(buf.encode())
+buf=inst.read(16)
+print(buf)
